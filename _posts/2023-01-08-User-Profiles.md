@@ -10,7 +10,8 @@ EDB Postgres Advanced Server (EPAS) is built on PostgreSQL and has been merging 
 You can initialize EPAS in one of two modes: Berkeley/Postgres and Redwood/Oracle. Initializing in Redwood Mode helps developers familiar with Oracle by setting 
 date/time Postgres GUCs to behave like Oracle Database plus adds many `DBMS_` and `UTL_` subprograms that Oracle Database developers are likely familiar with. This post focuses on the User Profiles capabilities under the advanced security additions to EPAS. 
 
-![_config.yml]({{ site.baseurl }}/images/epas_advanced_security.png)
+
+![Advanced Security](/theadamwright.github.io/assets/epas_advanced_security.png)
 
 Since EPAS **is** Postgres, all user/role concepts from PostgreSQL apply. As usual, the PostgreSQL [documentation](https://www.postgresql.org/docs/current/user-manag.html) covers database users and privileges in depth. Plenty of bloggers have written on this topic with valuable perspectives, and you can find them with a simple [search](https://duckduckgo.com/q=postgresql+user+management). An additional and optional capability EPAS adds to user management in Postgres is [User Profiles](https://www.enterprisedb.com/docs/epas/latest/epas_compat_ora_dev_guide/04_profile_management). The concept of User Profiles will be familiar to many users of commercial database systems. 
 
