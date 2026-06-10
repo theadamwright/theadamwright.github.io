@@ -230,6 +230,34 @@ th, td {
   text-align: left;
 }
 
+/* Talks */
+.talk {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 2rem;
+  margin-bottom: 2rem;
+}
+
+.talk:last-child {
+  border-bottom: none;
+}
+
+.talk h2 {
+  margin-bottom: 0.25rem;
+}
+
+.video-embed {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  margin-top: 1rem;
+}
+
+.video-embed iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 8px;
+}
+
 /* Footer */
 .site-footer {
   margin-top: 4rem;
