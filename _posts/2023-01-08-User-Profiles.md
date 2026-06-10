@@ -1,9 +1,12 @@
 ---
 title: "EPAS security feature you should know about - User Profiles" 
 date: 2023-01-08
+description: >-
+  How User Profiles in EDB Postgres Advanced Server enforce password complexity,
+  lock out brute-force attempts, and help you meet organizational password policy.
 ---
 
-# Overview of role management in Postgres 
+## Overview of role management in Postgres 
 
 EDB Postgres Advanced Server (EPAS) is built on PostgreSQL and has been merging changes from the upstream project for over 15 years. Every new major release of PostgreSQL results in a new major release of EPAS. 
 
@@ -11,18 +14,18 @@ You can initialize EPAS in one of two modes: Berkeley/Postgres and Redwood/Oracl
 date/time Postgres GUCs to behave like Oracle Database plus adds many `DBMS_` and `UTL_` subprograms that Oracle Database developers are likely familiar with. This post focuses on the User Profiles capabilities under the advanced security additions to EPAS. 
 
 
-![Advanced Security](../../../images/epas_advanced_security.png)
+![Advanced Security]({{ '/images/epas_advanced_security.png' | relative_url }})
 
-Since EPAS **is** Postgres, all user/role concepts from PostgreSQL apply. As usual, the PostgreSQL [documentation](https://www.postgresql.org/docs/current/user-manag.html) covers database users and privileges in depth. Plenty of bloggers have written on this topic with valuable perspectives, and you can find them with a simple [search](https://duckduckgo.com/q=postgresql+user+management). An additional and optional capability EPAS adds to user management in Postgres is [User Profiles](https://www.enterprisedb.com/docs/epas/latest/epas_compat_ora_dev_guide/04_profile_management). The concept of User Profiles will be familiar to many users of commercial database systems. 
+Since EPAS **is** Postgres, all user/role concepts from PostgreSQL apply. As usual, the PostgreSQL [documentation](https://www.postgresql.org/docs/current/user-manag.html) covers database users and privileges in depth. Plenty of bloggers have written on this topic with valuable perspectives, and you can find them with a simple [search](https://duckduckgo.com/q=postgresql+user+management). An additional and optional capability EPAS adds to user management in Postgres is [User Profiles](https://www.enterprisedb.com/docs/epas/latest/epas_security_guide/04_profile_management/). The concept of User Profiles will be familiar to many users of commercial database systems. 
 
 This blog post aims to remind people how User Profiles in EPAS help you meet the password requirements of your organization.
 
 
-# Password Complexity 
+## Password Complexity 
 
 The main benefit of password complexity is that it makes a password harder to crack than a dictionary word. Harder, meaning that it will theoretically take a computer a long time to break a reasonably long password with a combination of letters, numbers, and characters. To test this, you only need to set a password to a string of characters and use one of the many password crackers online that will quickly find a match. 
 
-Whether you are convinced that password complexity rules are meaningful security measures, it often doesn't matter, as almost all organizations have password complexity rules that apply to database systems. 
+Whether or not you are convinced that password complexity rules are meaningful security measures, it often doesn't matter, as almost all organizations have password complexity rules that apply to database systems. 
 
 PostgreSQL has no internal mechanism to enforce password complexity, and the PostgreSQL catalog tables do not indicate how long or complex a user's password could be. The following two commands that create roles with login privileges will succeed: 
 
@@ -31,7 +34,7 @@ create user dolores with password '<BGZ8#qZ\O|XXll';
 create user maeve with password 'abc';
 ```
 
-If you look at the `pg_users` and `pg_shadow`  tables,  you cannot tell that one password only contains three letters and the other is longer with a mix of letters and numbers. The `pg_user` table would reveal if no password has been set for a role. Not being able to glean more information about a user's password likely has more upside than downside. 
+If you look at the `pg_user` and `pg_shadow` tables, you cannot tell that one password only contains three letters and the other is longer with a mix of letters and numbers. The `pg_user` table would reveal if no password has been set for a role. Not being able to glean more information about a user's password likely has more upside than downside. 
 
 ```
 -[ RECORD 1 ]----------------------------------------------------------------------------------------------------------------------------------
@@ -44,7 +47,7 @@ passwd  | SCRAM-SHA-256$4096:fNidP3OzqTpnbFIGRqj6fw==$6sNo44R3VGarHOPtUA4FIMCYex
 passwd  | ********
 ```
 
-## Enforcing complexity with User Profiles 
+### Enforcing complexity with User Profiles 
 
 User Profiles are flexible in the way policies can be enforced. You can apply any or all of the several policy rules in EPAS. The actual flexibility provided to you is by allowing you to write database functions that enforce your organization's unique policy.
 
@@ -67,7 +70,7 @@ END;
 CREATE PROFILE org_password_policy LIMIT PASSWORD_VERIFY_FUNCTION verify_password;
 ```
 
-Now that we have our policy set, let's create user maeve like above, but associate the newly create Profile with maeve: 
+Now that we have our policy set, let's create user maeve like above, but associate the newly created Profile with maeve: 
 
 ```
 create user maeve password 'abc' profile org_password_policy;
@@ -76,7 +79,7 @@ ERROR:  Password must consist of 15 or more characters
 
 This time we cannot create a new login role for maeve using the same password because the password does not contain enough characters. Enforcing character length alone goes a long way, but your organization likely has more requirements. And your organization could have different policies for different groups. So, it's best to future-proof with separate functions for checking and setting password rules. Doing so prevents you from forking multiple `verify_password` functions and allows you to add additional rules and fix bugs easily. 
 
-Let's create a new password rule checker function and a function associated with a User Profile that defines the password rules. For portability, we will use a function that follows similar logic to Oracle's and other commercial databases but works in both Redwood and non-Redwood modes in EPAS. Most of Oracle's sample scripts for User Profiles work Out of The Box in Redwood Mode, and many DBAs are familiar with this pattern already. In our [password_rule_checker](https://github.com/theadamwright/assets/blob/main/epas/epas_password_rule_check.sql), we will create checks to escape the delimiters and password length and enforce a mix of letters and lower and upper case characters. Here are the possible exceptions thrown from our password rule check function. 
+Let's create a new password rule checker function and a function associated with a User Profile that defines the password rules. For portability, we will use a function that follows similar logic to Oracle's and other commercial databases but works in both Redwood and non-Redwood modes in EPAS. Most of Oracle's sample scripts for User Profiles work out of the box in Redwood Mode, and many DBAs are familiar with this pattern already. In our [password_rule_checker](https://github.com/theadamwright/assets/blob/main/epas/epas_password_rule_check.sql), we will create checks to escape the delimiters and password length and enforce a mix of letters and lower and upper case characters. Here are the possible exceptions thrown from our password rule check function. 
 
 ```
   IF substring(new_password FROM old_password) IS NOT NULL
@@ -138,11 +141,11 @@ CREATE ROLE
 These examples demonstrate how you can easily enforce any password policy with User Profiles in EPAS. One could easily add additional requirements like checking the password string for upper and lower characters and block setting a password to one that matches a password in a common password list.  
 
 
-## Failed login attempts 
+### Failed login attempts 
 
 While the first defense strategy should control where users can connect via `pg_hba.conf` settings, you should always add additional defense layers and assume that, at some point, other areas of your infrastructure will be misconfigured or even compromised. 
 
-For this, let's assume a malicious actor comes from an IP that matches a rule in your `pg_hba.conf`. Having a good complexity rule in place will help ensure that the malicious actor can't guess the password quickly. To keep anyone from using a password cracker without disruption, we can follow the examples from [EDB Docs](https://www.enterprisedb.com/docs/epas/latest/epas_compat_ora_dev_guide/04_profile_management/01_creating_a_new_profile/#examples) and add `FAILED_LOGIN_ATTEMPTS` and `PASSWORD_LOCK_TIME`. If you're familiar with `fail2ban`, think of these like `maxretry` and `bantime`. 
+For this, let's assume a malicious actor comes from an IP that matches a rule in your `pg_hba.conf`. Having a good complexity rule in place will help ensure that the malicious actor can't guess the password quickly. To keep anyone from using a password cracker without disruption, we can follow the examples from [EDB Docs](https://www.enterprisedb.com/docs/epas/latest/epas_security_guide/04_profile_management/01_creating_a_new_profile/#examples) and add `FAILED_LOGIN_ATTEMPTS` and `PASSWORD_LOCK_TIME`. If you're familiar with `fail2ban`, think of these like `maxretry` and `bantime`. 
 
 We can demonstrate that it's possible to keep trying different passwords without these rules until a person is alerted and intervenes. Let's try five consecutive login attempts with bad passwords and then use the correct password on attempt six:  
 
@@ -197,16 +200,16 @@ postgres=# select usename, uselockdate from pg_user where usename = 'maeve';
  maeve     | 2023-01-07 21:51:07.729187+00
 ```
 
-Another common password rule is that a user of the system must change their password every x number of days, and a user cannot reuse a password within x number of days and must change their password so many times before using the password. We can use the `PASSWORD_LIFE_TIME` and `PASSWORD_REUSE_*` rules covered in [EDB Docs](https://www.enterprisedb.com/docs/epas/latest/epas_compat_ora_dev_guide/04_profile_management/) to enforce these. 
+Another common password rule is that a user of the system must change their password every x number of days, and a user cannot reuse a password within x number of days and must change their password so many times before using the password. We can use the `PASSWORD_LIFE_TIME` and `PASSWORD_REUSE_*` rules covered in [EDB Docs](https://www.enterprisedb.com/docs/epas/latest/epas_security_guide/04_profile_management/) to enforce these. 
 
-# Other Considerations
+## Other Considerations
 
 Most organizations have a single source of truth for users and prefer to authenticate database users through a Directory server like LDAP. Authenticating database users against LDAP is covered in [PostgreSQL docs](https://www.postgresql.org/docs/current/auth-ldap.html) and usually works without much fuss, which allows you to streamline activities like enforcing password complexity. You no longer have to mimic rules in the database that match your Directory server. 
 
 There are some considerations when authenticating against a 3rd party identity service: 
-* You can end up managing users in two places: the user gets added to LDAP, and now the DBA takes a second action to the LDAP user to Postgres 
-	* A few good tools, such as [ldap2pg](https://ldap2pg.readthedocs.io/en/latest/#installation) are available to reduce this burden:  the user is added to an LDAP organizational unit by a Domain Administrator, and the synchronization runs at some interval to the Postgres with LDAP, either by adding the user to Postgres or removing the user from Postgres. 
-* Another challenge is the authentication between Postgres and LDAP since the LDAP bind user in many organizations has its password. In practice, your synchronization tool has to store the bind user ID and password, and Postgres needs to store the bind user ID and password. There are some less commonly used ways of avoiding this, such as having PAM read from LDAP, but the most common case in practice is storing the LDAP configuration with options for search+bind in the pg_hba.conf. Note: EPAS 15 (Feb 2023) will have a module that lets you securely obfuscate the LDAP bind password with an external module. However, it's not yet possible for that same external module to be used by other synchronization tools or a 3rd party connection pool. 
+* You can end up managing users in two places: the user gets added to LDAP, and now the DBA takes a second action to add the LDAP user to Postgres 
+	* A few good tools, such as [ldap2pg](https://ldap2pg.readthedocs.io/en/latest/#installation) are available to reduce this burden: the user is added to an LDAP organizational unit by a Domain Administrator, and the synchronization runs at some interval to keep Postgres in sync with LDAP, either by adding the user to Postgres or removing the user from Postgres. 
+* Another challenge is the authentication between Postgres and LDAP since the LDAP bind user in many organizations has its own password. In practice, your synchronization tool has to store the bind user ID and password, and Postgres needs to store the bind user ID and password. There are some less commonly used ways of avoiding this, such as having PAM read from LDAP, but the most common case in practice is storing the LDAP configuration with options for search+bind in the pg_hba.conf. Note: EPAS 15 (Feb 2023) will have a module that lets you securely obfuscate the LDAP bind password with an external module. However, it's not yet possible for that same external module to be used by other synchronization tools or a 3rd party connection pool. 
 * LDAP support among the various connection poolers varies. You will want to check your application-level connection pooling documentation or database-level connection pooler documentation to verify it meets your requirements for external authentication. 
 
-The challenges above may or may not be relevant to your use case. Hopefully, those challenges will be alleviated for everyone by the various tools soon. For now, EPAS users can meet organizational password policies with User Profiles in addition to the option of external identity services
+The challenges above may or may not be relevant to your use case. Hopefully, those challenges will be alleviated for everyone by the various tools soon. For now, EPAS users can meet organizational password policies with User Profiles in addition to the option of external identity services.

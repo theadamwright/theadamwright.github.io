@@ -1,11 +1,21 @@
-remote_theme: pages-themes/hacker@v0.2.0
+title: Adam Wright
+tagline: Distributed Postgres, Security, and Kubernetes
+description: >-
+  Notes on distributed databases, security, and Kubernetes from Adam Wright,
+  Product Manager for EDB Postgres Distributed (PGD).
+url: "https://theadamwright.github.io"
+author:
+  name: Adam Wright
+
 plugins:
-- jekyll-remote-theme
+  - jekyll-seo-tag
+  - jekyll-feed
 
-title: theadamwright.github.io
-description: Databases, Security, and K8s 
+markdown: kramdown
 
-#theme: minima
-
-# description (displayed in the header)
-# description: databases, software security, and K8s
+defaults:
+  - scope:
+      path: ""
+      type: posts
+    values:
+      layout: post
