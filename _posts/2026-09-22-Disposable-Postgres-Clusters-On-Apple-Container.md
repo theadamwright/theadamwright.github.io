@@ -43,7 +43,9 @@ These would hit anyone running clustered software on this runtime, not just Post
 
 Bringing an existing cluster back up was taking 4 minutes 43 seconds, against 25 seconds to press a completely fresh one. That is backwards, and nothing in normal use pointed at why.
 
-`container stop` sends SIGTERM and kills the container five seconds later. Both defaults are wrong for a database. Postgres reads SIGTERM as a *smart* shutdown: stop accepting new connections, then wait for every existing client to disconnect. Cluster members hold connections open to each other, so that wait never ends on its own. The five seconds expire, the runtime SIGKILLs the server, and the node lands on disk unclean:
+`container stop` sends SIGTERM and kills the container five seconds later. Both defaults are wrong for a database. Postgres reads SIGTERM as a *smart* shutdown: stop accepting new connections, then wait for existing client sessions to end on their own.
+
+Replication connections are exempt from that wait. The postmaster reclassifies walsenders and shuts them down later, after the checkpoint. Ordinary client backends are not exempt, and a PGD node always has some: Connection Manager holds pooled backends, the monitor worker has its own, and consensus traffic between nodes arrives as ordinary connections too. None of them are going to disconnect because you asked the container to stop, so the wait does not end. The five seconds expire, the runtime SIGKILLs the server, and the node lands on disk unclean:
 
 ```
 LOG:  database system was not properly shut down; automatic recovery in progress
@@ -51,7 +53,11 @@ LOG:  database system was not properly shut down; automatic recovery in progress
 
 Every stop was a crash. Nothing complained at the time, because the container did stop. You only pay for it on the next startup, which is slow for no visible reason.
 
-The fix is SIGINT, which is Postgres's fast shutdown, with a grace period that is not five seconds. This is the same reason the official Postgres Docker image sets `STOPSIGNAL SIGINT`, and it will apply to anything you run here that treats SIGTERM as "finish your work first".
+The fix is SIGINT, which is Postgres's fast shutdown, with a grace period that is not five seconds.
+
+None of this is new. The official Postgres Docker image has set `STOPSIGNAL SIGINT` since September 2020, for exactly this reason. What bit me is that `apple/container` has no equivalent default and I had not thought to set one, so I got the OCI default of SIGTERM and a five second timer. Worth checking on any runtime where you built the image yourself.
+
+To be clear about the damage: an unclean shutdown costs you WAL replay on the next start, not your data. Postgres is built for this. It was slow, not dangerous.
 
 ```
 down                    16.9s  ->   1.1s
