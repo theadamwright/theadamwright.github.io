@@ -85,7 +85,7 @@ Fifty sequential connects through the cluster's connection router, each opening 
 
 ## What is still off
 
-One case survives the signal fix. Stop a node while it is still catching up rather than settled, and fast shutdown does not finish inside the grace period either, so that node crash-recovers exactly as before. I hit it by tearing down 20 seconds after restarting a node: that cycle cost 1 minute 5 seconds to stop and 3 minutes 42 seconds to come back, against 1.1 and 18.6 for the same cycle on a settled cluster.
+One case survives the signal fix. Stop a node while it is still catching up rather than settled, and fast shutdown does not finish inside the grace period either, so that node crash-recovers exactly as before. I hit it by tearing down 20 seconds after restarting a node. That cycle took 1 minute 5 seconds to stop and 3 minutes 42 seconds to come back. The same down and up on a settled cluster takes 1.1 seconds and 18.6 seconds.
 
 Raising the grace period further is not the answer. I need to check the node is in a state where it can shut down cleanly before asking it to, and I have not built that yet.
 
