@@ -7,9 +7,9 @@ description: >-
   how to try it on a pair of nodes, and the gotchas I hit doing that.
 ---
 
-Like every PostgreSQL release since version 10, PostgreSQL 19 includes a number of logical replication enhancements. Thank you to all the PostgreSQL hackers and reviewers who made 19 another great release for logical replication. At the time of this writing, packages exist for beta4. I went through each logical replication item in the release notes and ran it on a pair of PostgreSQL 19 beta4 containers.  Here are my notes, the practical implications, and what surprised me.
+Like almost every PostgreSQL release since version 10, PostgreSQL 19 includes a number of logical replication enhancements. Thank you to all the PostgreSQL hackers and reviewers who made 19 another great release for logical replication. At the time of this writing, packages exist for beta4. I went through each logical replication item in the release notes and ran it on a pair of PostgreSQL 19 beta4 containers.  Here are my notes, the practical implications, and what surprised me.
 
-Two caveats. It is a beta, so a feature can still be pulled before release, an unusual number of features were reverted late in the cycle. Everything below was run on 19beta4. And some of these features already have very good write-ups. In those cases, I kept it short and linked to them. 
+Two caveats. It is a beta, so a feature can still be pulled before release. An unusual number of features were reverted late in the cycle. Everything below was run on 19beta4. And some of these features already have very good write-ups. In those cases, I kept it short and linked to them. 
 
 ## The test setup
 
@@ -41,7 +41,7 @@ SELECT last_value FROM order_id;
 
 On 19, `./cider logical endpoints` prints a complete one-way script for this, from creating the sequence to the first insert after cutover.
 
-The values are copied when the subscription is created, when `REFRESH PUBLICATION` finds a new sequence, and when you run `REFRESH SEQUENCES`. At no other time. In between, rows keep replicating and the sequences stay where they were. That makes this a feature for cutovers and upgrades, and the practical points all follow from it:
+The values are copied when the subscription is created (with the default `copy_data = true`), when `REFRESH PUBLICATION` finds a new sequence, and when you run `REFRESH SEQUENCES`. At no other time. In between, rows keep replicating and the sequences stay where they were. That makes this a feature for cutovers and upgrades, and the practical points all follow from it:
 
 - **`REFRESH SEQUENCES` returns before the values change.** A background worker applies them, in under half a second in my tests, but an insert sent straight after the command still got the old value. Check `last_value` before you move writes. [depesz's walkthrough](https://www.depesz.com/2025/11/11/waiting-for-postgresql-19-sequence-synchronization-in-logical-replication/) shows the same thing with timings on 10,000 sequences.
 - **It needs a free worker slot, and says so only in the log.** On a node already running as many subscriptions as `max_logical_replication_workers` allows (4 by default), `REFRESH SEQUENCES` returned success and nothing changed. The sequence stayed in state `i` in `pg_subscription_rel`, and the only clue was `WARNING: out of logical replication worker slots` in the server log. Freeing a slot let it finish.
@@ -88,8 +88,8 @@ What it means in practice:
 - **It is detection, not resolution.** Node 2 applies the incoming delete and node 1 skips the incoming update. Both nodes end without the row, so the update is lost on both, and the only record is the log line and a counter in `pg_stat_subscription_stats.confl_update_deleted`.
 - **Pause both subscriptions to reproduce it.** If only one is paused, the delete reaches the other node before the update is made, and the `UPDATE` finds nothing to change.
 - **`SET` can fail straight after `DISABLE`.** I got `cannot alter option "retain_dead_tuples" when logical replication worker is still running`. Waiting a moment and running it again worked.
-- **The cost is dead rows.** While the subscription runs, the slot's `xmin` keeps moving forward by itself. While it is disabled, the `xmin` stays put and dead rows are not marked for reuse. Postgres warns about this at `DISABLE`, and the docs suggest turning the option off before a long pause. Turning it off drops the slot.
-- **`max_retention_duration` caps the retention.** If the apply worker can't move the slot forward within that time, retention stops (`pg_subscription.subretentionactive` goes false), `update_deleted` detection pauses, and it resumes when the worker catches up. An open transaction on the publisher did not hold the slot back. It is aimed at a subscriber that falls behind in applying changes.
+- **The cost is dead rows.** While the subscription runs, the slot's `xmin` keeps moving forward by itself. While it is disabled, the `xmin` stays put and VACUUM can't remove the dead rows. Postgres warns about this at `DISABLE`, and the docs suggest turning the option off before a long pause. Turning it off drops the slot.
+- **`max_retention_duration` caps the retention.** According to the docs, if the apply worker can't move the slot forward within that time, retention stops (`pg_subscription.subretentionactive` goes false), `update_deleted` detection pauses, and it resumes when the worker catches up. The slot is shared, so retention stops only once every subscription using it has passed its limit. In my tests an open transaction on the publisher did not hold the slot back; the cap is aimed at a subscriber that falls behind in applying changes.
 
 ## Subscribing through a foreign server
 
@@ -139,9 +139,15 @@ Commits: [fd36606](https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;
 CREATE PUBLICATION everything_but_audit FOR ALL TABLES EXCEPT (TABLE audit_log);
 ```
 
-`\dRp+` lists the exclusions under `Except tables`. The syntax changed during development, which is why older posts and patches show other forms; the parenthesised form above is the one in 19. [Peter Smith's post](https://www.postgresql.fastware.com/pzone/excluding-tables-from-publications-in-postgresql-19) covers partitions and inheritance in depth, and [depesz](https://www.depesz.com/2026/03/26/waiting-for-postgresql-19-add-support-for-except-table-in-alter-publication/) shows that `ALTER PUBLICATION ... SET ALL TABLES EXCEPT` replaces the list rather than adding to it.
+`\dRp+` lists the exclusions under `Except tables`. The syntax changed during development, which is why older posts and patches show other forms; the parenthesised form above is the one in 19. [Peter Smith's post](https://www.postgresql.fastware.com/pzone/excluding-tables-from-publications-in-postgresql-19) goes through how partitions and inheritance are handled: only a partitioned table's root can be excluded, which excludes its whole tree, and `ONLY` limits an exclusion to the parent of an inheritance tree. [depesz](https://www.depesz.com/2026/03/26/waiting-for-postgresql-19-add-support-for-except-table-in-alter-publication/) shows that `ALTER PUBLICATION ... SET ALL TABLES EXCEPT` replaces the exclusion list rather than adding to it. His post predates the syntax change, so it uses the older `EXCEPT TABLE (...)` form, which 19 rejects.
 
-The point that matters day to day: **a table created later is published automatically, but the subscriber does not start receiving it until `ALTER SUBSCRIPTION ... REFRESH PUBLICATION`.** On the pair, rows inserted into a new table before the refresh did not arrive. The refresh then copied them, because `copy_data` is on by default. In a bidirectional setup, `EXCEPT` is also a simple way to keep node-local tables, an audit log say, out of the stream entirely.
+Two things matter day to day, and neither is new in 19: they apply to any `FOR ALL TABLES` publication.
+
+**Create a new table on the subscriber first.** A table created later joins the publication automatically. If a row is written to it before the table exists on the subscriber, the apply worker stops with `logical replication target relation "public.…" does not exist`, and nothing else in that subscription gets through until the table is created there. Once it exists, the subscriber ignores the table until `ALTER SUBSCRIPTION ... REFRESH PUBLICATION`, which copies the rows written so far because `copy_data` is on by default.
+
+**In both directions, copy on one side only.** Refresh one node with the default and the other `WITH (copy_data = false)`. With the default on both, the second node copies back rows that came from the first, the copy fails on a duplicate key and retries, and that table stops replicating in that direction. Postgres warns about it at the refresh: `requested copy_data with origin = NONE but might copy data that had a different origin`.
+
+In a bidirectional setup, `EXCEPT` is also a simple way to keep node-local tables, an audit log say, out of the stream: exclude them in each node's publication.
 
 ## Logical decoding without a restart
 
@@ -153,7 +159,7 @@ The practical upshot is one less restart to schedule before you can start replic
 
 ## Smaller changes
 
-- **`pg_replication_origin_session_setup()` takes a pid** ([5b14870](https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=5b148706c5c8ffffe5662fe569a0f0bcef2351d9), [thread](https://postgr.es/m/CAMPB6wfe4zLjJL8jiZV5kjjpwBM2=rTRme0UCL7Ra4L8MTVdOg@mail.gmail.com)), so a session can attach to a replication origin another process has already set up. That is for tools that apply changes in parallel at the SQL level.
+- **`pg_replication_origin_session_setup()` takes a pid** ([5b14870](https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=5b148706c5c8ffffe5662fe569a0f0bcef2351d9), [thread](https://postgr.es/m/CAMPB6wfe4zLjJL8jiZV5kjjpwBM2=rTRme0UCL7Ra4L8MTVdOg@mail.gmail.com)), so several processes can share one replication origin, the way core's parallel apply workers already do. That lets replication tools outside core apply large transactions in parallel.
 - **pg_createsubscriber** can reuse publications that already exist ([85ddcc2](https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=85ddcc2f4cdef490276d151c80459e287bceb782), [thread](https://postgr.es/m/CAHv8Rj%2BsxWutv10WiDEAPZnygaCbuY2RqiLMj2aRMH-H3iZwyA%40mail.gmail.com)), writes its recovery settings to a separate `pg_createsubscriber.conf` instead of `postgresql.auto.conf` ([639352d](https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=639352d904c8a3d233989253f569cccbea0be123), [thread](https://postgr.es/m/CAGWv16K6L6Pzm99i1KiXLjFWx2bUS3DVsR6yV87-YR9QO7xb3A@mail.gmail.com)), and gains `--logdir` ([6b5b7ea](https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=6b5b7eae3ae65572e2abda20ef2b2c908527c28a), [thread](https://postgr.es/m/CAEqnbaUthOQARV1dscGvB_EsqC-YfxiM6rWkVDHc+G+f4oSUHw@mail.gmail.com)).
 
 ## If you run it in both directions
